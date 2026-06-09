@@ -80,6 +80,41 @@ const api = {
   async getYearlyReportData(year) {
     const res = await fetch(`${API_BASE}/api/report/yearly?year=${year}`);
     return res.json();
+  },
+  async getSoilRecords(plantId) {
+    const url = plantId ? `${API_BASE}/api/soil-records?plantId=${plantId}` : `${API_BASE}/api/soil-records`;
+    const res = await fetch(url);
+    return res.json();
+  },
+  async createSoilRecord(formData) {
+    const res = await fetch(`${API_BASE}/api/soil-records`, {
+      method: 'POST',
+      body: formData
+    });
+    return res.json();
+  },
+  async updateSoilRecord(id, formData) {
+    const res = await fetch(`${API_BASE}/api/soil-records/${id}`, {
+      method: 'PUT',
+      body: formData
+    });
+    return res.json();
+  },
+  async deleteSoilRecord(id) {
+    const res = await fetch(`${API_BASE}/api/soil-records/${id}`, { method: 'DELETE' });
+    return res.json();
+  },
+  async getSoilAdvice(id) {
+    const res = await fetch(`${API_BASE}/api/soil-records/${id}/advice`);
+    return res.json();
+  },
+  async getSoilReminders() {
+    const res = await fetch(`${API_BASE}/api/soil-reminders`);
+    return res.json();
+  },
+  async getSuitableRanges() {
+    const res = await fetch(`${API_BASE}/api/plant-suitable-ranges`);
+    return res.json();
   }
 };
 
@@ -256,6 +291,12 @@ const App = {
             </a>
           </li>
           <li>
+            <a @click="navigate('soilArchive')" :class="{ active: currentRoute === 'soilArchive' }">
+              <el-icon><Memo /></el-icon>
+              <span>土壤水质档案</span>
+            </a>
+          </li>
+          <li>
             <a @click="navigate('report')" :class="{ active: currentRoute === 'report' }">
               <el-icon><Document /></el-icon>
               <span>年度报告</span>
@@ -275,6 +316,7 @@ const App = {
         <notification-page v-else-if="currentRoute === 'notifications'" :notifications="notifications" @refresh="loadNotifications" />
         <photo-timeline v-else-if="currentRoute === 'photos'" />
         <pest-detection v-else-if="currentRoute === 'pests'" />
+        <soil-archive v-else-if="currentRoute === 'soilArchive'" />
         <yearly-report v-else-if="currentRoute === 'report'" />
       </main>
     </div>
@@ -1447,6 +1489,549 @@ const PestDetection = {
   `
 };
 
+const SoilArchive = {
+  setup() {
+    const plants = ref([]);
+    const records = ref([]);
+    const reminders = ref([]);
+    const suitableRanges = ref({});
+    const loading = ref(false);
+    const selectedPlantId = ref('');
+    const dialogVisible = ref(false);
+    const adviceDialogVisible = ref(false);
+    const currentAdvice = ref(null);
+    const isEdit = ref(false);
+    const editingId = ref(null);
+    const uploadFile = ref(null);
+    const phChart = ref(null);
+
+    const mediumOptions = [
+      { value: '泥炭土', label: '泥炭土' },
+      { value: '椰糠', label: '椰糠' },
+      { value: '珍珠岩', label: '珍珠岩' },
+      { value: '蛭石', label: '蛭石' },
+      { value: '腐叶土', label: '腐叶土' },
+      { value: '园土', label: '园土' },
+      { value: '河沙', label: '河沙' },
+      { value: '水苔', label: '水苔' },
+      { value: '赤玉土', label: '赤玉土' },
+      { value: '鹿沼土', label: '鹿沼土' },
+      { value: '树皮', label: '树皮' },
+      { value: '陶粒', label: '陶粒' }
+    ];
+
+    const formData = reactive({
+      plantId: '',
+      medium: '',
+      ph: 6.5,
+      hardness: 80,
+      soilChangeDate: '',
+      inspector: '',
+      testDate: ''
+    });
+
+    const filteredRecords = computed(() => {
+      if (!selectedPlantId.value) return records.value;
+      return records.value.filter(r => r.plantId === selectedPlantId.value);
+    });
+
+    const loadPlants = async () => {
+      try {
+        plants.value = await api.getPlants();
+      } catch (e) {
+        ElMessage.error('加载植物列表失败');
+      }
+    };
+
+    const loadRecords = async () => {
+      try {
+        loading.value = true;
+        records.value = await api.getSoilRecords();
+        nextTick(() => renderPhChart());
+      } catch (e) {
+        ElMessage.error('加载档案记录失败');
+      } finally {
+        loading.value = false;
+      }
+    };
+
+    const loadReminders = async () => {
+      try {
+        reminders.value = await api.getSoilReminders();
+      } catch (e) {
+        console.error('加载提醒失败', e);
+      }
+    };
+
+    const loadSuitableRanges = async () => {
+      try {
+        suitableRanges.value = await api.getSuitableRanges();
+      } catch (e) {
+        console.error('加载适宜区间失败', e);
+      }
+    };
+
+    const renderPhChart = () => {
+      const chartRecords = selectedPlantId.value
+        ? records.value.filter(r => r.plantId === selectedPlantId.value)
+        : records.value;
+      if (chartRecords.length === 0) return;
+
+      const sorted = [...chartRecords].sort((a, b) => new Date(a.testDate) - new Date(b.testDate));
+      const labels = sorted.map(r => {
+        const d = new Date(r.testDate);
+        return `${d.getMonth() + 1}/${d.getDate()}`;
+      });
+      const phData = sorted.map(r => r.ph);
+      const hardnessData = sorted.map(r => r.hardness);
+
+      const ctx = document.getElementById('soilPhChart');
+      if (!ctx) return;
+      if (phChart.value) phChart.value.destroy();
+
+      const datasets = [
+        {
+          label: 'pH值',
+          data: phData,
+          borderColor: '#2196f3',
+          backgroundColor: 'rgba(33, 150, 243, 0.1)',
+          fill: false,
+          tension: 0.3,
+          yAxisID: 'y'
+        },
+        {
+          label: '硬度(mg/L)',
+          data: hardnessData,
+          borderColor: '#ff9800',
+          backgroundColor: 'rgba(255, 152, 0, 0.1)',
+          fill: false,
+          tension: 0.3,
+          yAxisID: 'y1'
+        }
+      ];
+
+      const selectedPlant = plants.value.find(p => p.id === selectedPlantId.value);
+      if (selectedPlant && suitableRanges.value[selectedPlant.species]) {
+        const range = suitableRanges.value[selectedPlant.species];
+        datasets.push({
+          label: `适宜pH下限(${range.pH[0]})`,
+          data: phData.map(() => range.pH[0]),
+          borderColor: 'rgba(76, 175, 80, 0.5)',
+          borderDash: [5, 5],
+          pointRadius: 0,
+          yAxisID: 'y'
+        });
+        datasets.push({
+          label: `适宜pH上限(${range.pH[1]})`,
+          data: phData.map(() => range.pH[1]),
+          borderColor: 'rgba(76, 175, 80, 0.5)',
+          borderDash: [5, 5],
+          pointRadius: 0,
+          yAxisID: 'y'
+        });
+      }
+
+      phChart.value = new Chart(ctx, {
+        type: 'line',
+        data: { labels, datasets },
+        options: {
+          responsive: true,
+          plugins: { legend: { position: 'top' } },
+          scales: {
+            y: {
+              type: 'linear',
+              position: 'left',
+              title: { display: true, text: 'pH值' },
+              min: 3,
+              max: 10
+            },
+            y1: {
+              type: 'linear',
+              position: 'right',
+              title: { display: true, text: '硬度(mg/L)' },
+              min: 0,
+              max: 300,
+              grid: { drawOnChartArea: false }
+            }
+          }
+        }
+      });
+    };
+
+    const openAddDialog = () => {
+      isEdit.value = false;
+      editingId.value = null;
+      Object.assign(formData, {
+        plantId: selectedPlantId.value || (plants.value[0]?.id || ''),
+        medium: '',
+        ph: 6.5,
+        hardness: 80,
+        soilChangeDate: '',
+        inspector: '',
+        testDate: new Date().toISOString().split('T')[0]
+      });
+      uploadFile.value = null;
+      dialogVisible.value = true;
+    };
+
+    const openEditDialog = (record) => {
+      isEdit.value = true;
+      editingId.value = record.id;
+      Object.assign(formData, {
+        plantId: record.plantId,
+        medium: record.medium,
+        ph: record.ph,
+        hardness: record.hardness,
+        soilChangeDate: record.soilChangeDate ? record.soilChangeDate.split('T')[0] : '',
+        inspector: record.inspector,
+        testDate: record.testDate ? record.testDate.split('T')[0] : ''
+      });
+      uploadFile.value = null;
+      dialogVisible.value = true;
+    };
+
+    const handleSubmit = async () => {
+      if (!formData.plantId) {
+        ElMessage.warning('请选择植物');
+        return;
+      }
+      try {
+        const fd = new FormData();
+        fd.append('plantId', formData.plantId);
+        fd.append('medium', formData.medium);
+        fd.append('ph', formData.ph);
+        fd.append('hardness', formData.hardness);
+        if (formData.soilChangeDate) fd.append('soilChangeDate', new Date(formData.soilChangeDate).toISOString());
+        fd.append('inspector', formData.inspector);
+        if (formData.testDate) fd.append('testDate', new Date(formData.testDate).toISOString());
+        if (uploadFile.value) fd.append('photo', uploadFile.value);
+
+        if (isEdit.value) {
+          await api.updateSoilRecord(editingId.value, fd);
+          ElMessage.success('档案更新成功');
+        } else {
+          const result = await api.createSoilRecord(fd);
+          if (result.advice && result.advice.length > 0) {
+            currentAdvice.value = result;
+            adviceDialogVisible.value = true;
+          }
+          ElMessage.success('档案记录添加成功');
+        }
+        dialogVisible.value = false;
+        loadRecords();
+        loadReminders();
+      } catch (e) {
+        ElMessage.error('保存失败');
+      }
+    };
+
+    const handleDelete = async (record) => {
+      try {
+        await ElMessageBox.confirm('确定要删除这条档案记录吗？', '确认删除', { type: 'warning' });
+        await api.deleteSoilRecord(record.id);
+        ElMessage.success('删除成功');
+        loadRecords();
+        loadReminders();
+      } catch (e) {
+        if (e !== 'cancel') ElMessage.error('删除失败');
+      }
+    };
+
+    const viewAdvice = async (record) => {
+      try {
+        const data = await api.getSoilAdvice(record.id);
+        currentAdvice.value = data;
+        adviceDialogVisible.value = true;
+      } catch (e) {
+        ElMessage.error('获取建议失败');
+      }
+    };
+
+    const getPlantName = (plantId) => {
+      const plant = plants.value.find(p => p.id === plantId);
+      return plant ? plant.name : '未知';
+    };
+
+    const getPhStatus = (record) => {
+      const plant = plants.value.find(p => p.id === record.plantId);
+      if (!plant || !suitableRanges.value[plant.species]) return 'normal';
+      const range = suitableRanges.value[plant.species];
+      if (record.ph < range.pH[0] || record.ph > range.pH[1]) return 'danger';
+      return 'normal';
+    };
+
+    const getHardnessStatus = (record) => {
+      const plant = plants.value.find(p => p.id === record.plantId);
+      if (!plant || !suitableRanges.value[plant.species]) return 'normal';
+      const range = suitableRanges.value[plant.species];
+      if (record.hardness < range.hardness[0] || record.hardness > range.hardness[1]) return 'warning';
+      return 'normal';
+    };
+
+    const handleFileChange = (uploadFileObj) => {
+      uploadFile.value = uploadFileObj.raw;
+    };
+
+    const getReminderIcon = (type) => {
+      const map = { 'soil-change': '⚡', 'soil-refresh': '🔄', 'soil-advice': '💡' };
+      return map[type] || '📋';
+    };
+
+    const getReminderClass = (level) => {
+      return level === 'warning' ? 'overdue' : 'upcoming';
+    };
+
+    watch(selectedPlantId, () => {
+      nextTick(() => renderPhChart());
+    });
+
+    onMounted(async () => {
+      await loadPlants();
+      await loadRecords();
+      await loadReminders();
+      await loadSuitableRanges();
+    });
+
+    return {
+      plants,
+      records,
+      reminders,
+      suitableRanges,
+      loading,
+      selectedPlantId,
+      dialogVisible,
+      adviceDialogVisible,
+      currentAdvice,
+      isEdit,
+      formData,
+      mediumOptions,
+      filteredRecords,
+      openAddDialog,
+      openEditDialog,
+      handleSubmit,
+      handleDelete,
+      viewAdvice,
+      getPlantName,
+      getPhStatus,
+      getHardnessStatus,
+      handleFileChange,
+      getReminderIcon,
+      getReminderClass,
+      formatDate
+    };
+  },
+  template: `
+    <div>
+      <div class="page-header">
+        <h1 class="page-title">🧪 土壤水质档案</h1>
+        <div class="page-header-actions">
+          <el-button type="primary" @click="openAddDialog">
+            <el-icon><Plus /></el-icon> 新增检测记录
+          </el-button>
+        </div>
+      </div>
+
+      <div v-if="reminders.length > 0" class="chart-container" style="margin-bottom: 24px; border-left: 4px solid #ff9800;">
+        <h3 class="chart-title">🔔 土壤水质提醒</h3>
+        <div v-for="reminder in reminders" :key="reminder.id" class="notification-item" :class="getReminderClass(reminder.level)">
+          <div class="notification-icon">{{ getReminderIcon(reminder.type) }}</div>
+          <div class="notification-content">
+            <div class="notification-title">{{ reminder.message }}</div>
+            <div class="notification-desc">
+              <span v-if="reminder.type === 'soil-change'">
+                检测值变化：pH {{ reminder.previousRecord?.ph }} → {{ reminder.latestRecord?.ph }}，
+                硬度 {{ reminder.previousRecord?.hardness }} → {{ reminder.latestRecord?.hardness }}
+              </span>
+              <span v-else-if="reminder.type === 'soil-advice'">
+                <div v-for="a in reminder.advice" :key="a.field" style="margin-top: 4px;">
+                  <el-tag size="small" :type="a.level === 'warning' ? 'danger' : 'info'">{{ a.field }}</el-tag> {{ a.message }}
+                </div>
+              </span>
+              <span v-else-if="reminder.type === 'soil-refresh'">已过 {{ reminder.daysSinceChange }} 天</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="filter-bar">
+        <el-select v-model="selectedPlantId" placeholder="全部植物" clearable style="width: 250px;">
+          <el-option v-for="plant in plants" :key="plant.id" :label="plant.name + ' - ' + plant.species" :value="plant.id" />
+        </el-select>
+        <span style="color: #666; margin-left: auto;">共 {{ filteredRecords.length }} 条记录</span>
+      </div>
+
+      <div v-if="filteredRecords.length > 0" class="chart-container" style="margin-bottom: 24px;">
+        <h3 class="chart-title">📈 土壤水质趋势</h3>
+        <canvas id="soilPhChart" height="250"></canvas>
+      </div>
+
+      <div v-loading="loading">
+        <div v-if="filteredRecords.length === 0" class="empty-state">
+          <div class="empty-state-icon">🧪</div>
+          <div class="empty-state-text">暂无土壤水质档案，点击上方按钮新增检测记录</div>
+          <el-button type="primary" @click="openAddDialog">新增记录</el-button>
+        </div>
+        <div v-else class="soil-record-list">
+          <div v-for="record in filteredRecords" :key="record.id" class="soil-record-card">
+            <div class="soil-record-header">
+              <div class="soil-record-plant">
+                <span class="soil-record-plant-name">{{ getPlantName(record.plantId) }}</span>
+                <span class="soil-record-date">{{ formatDate(record.testDate) }}</span>
+              </div>
+              <div class="soil-record-actions">
+                <el-button size="small" type="primary" text @click="viewAdvice(record)">💡 调水建议</el-button>
+                <el-button size="small" text @click="openEditDialog(record)">✏️ 编辑</el-button>
+                <el-button size="small" type="danger" text @click="handleDelete(record)">🗑️ 删除</el-button>
+              </div>
+            </div>
+            <div class="soil-record-body">
+              <div class="soil-record-field">
+                <span class="soil-field-label">🪴 介质</span>
+                <span class="soil-field-value">{{ record.medium || '-' }}</span>
+              </div>
+              <div class="soil-record-field">
+                <span class="soil-field-label">🔬 pH值</span>
+                <span class="soil-field-value">
+                  <el-tag :type="getPhStatus(record) === 'danger' ? 'danger' : 'success'" size="small">
+                    {{ record.ph }}
+                  </el-tag>
+                </span>
+              </div>
+              <div class="soil-record-field">
+                <span class="soil-field-label">💧 硬度(mg/L)</span>
+                <span class="soil-field-value">
+                  <el-tag :type="getHardnessStatus(record) === 'warning' ? 'warning' : 'success'" size="small">
+                    {{ record.hardness }}
+                  </el-tag>
+                </span>
+              </div>
+              <div class="soil-record-field">
+                <span class="soil-field-label">🔄 换土日</span>
+                <span class="soil-field-value">{{ record.soilChangeDate ? formatDate(record.soilChangeDate) : '-' }}</span>
+              </div>
+              <div class="soil-record-field">
+                <span class="soil-field-label">👤 检测人</span>
+                <span class="soil-field-value">{{ record.inspector || '-' }}</span>
+              </div>
+              <div v-if="record.photo" class="soil-record-field">
+                <span class="soil-field-label">📷 照片</span>
+                <span class="soil-field-value">
+                  <el-image :src="record.photo" style="width: 60px; height: 60px; border-radius: 8px;" fit="cover"
+                    :preview-src-list="[record.photo]" preview-teleported />
+                </span>
+              </div>
+            </div>
+            <div v-if="record.advice && record.advice.length > 0" class="soil-record-advice">
+              <div v-for="a in record.advice" :key="a.field" class="advice-item" :class="'advice-' + a.level">
+                <span class="advice-icon">{{ a.level === 'warning' ? '⚠️' : 'ℹ️' }}</span>
+                <span>{{ a.message }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <el-dialog v-model="dialogVisible" :title="isEdit ? '编辑检测记录' : '新增检测记录'" width="700px">
+        <el-form :model="formData" label-width="120px">
+          <el-form-item label="选择植物" required>
+            <el-select v-model="formData.plantId" placeholder="请选择植物" style="width: 100%;">
+              <el-option v-for="plant in plants" :key="plant.id" :label="plant.name + ' - ' + plant.species" :value="plant.id" />
+            </el-select>
+          </el-form-item>
+          <el-row :gutter="20">
+            <el-col :span="12">
+              <el-form-item label="介质">
+                <el-select v-model="formData.medium" placeholder="选择介质" style="width: 100%;" clearable filterable allow-create>
+                  <el-option v-for="opt in mediumOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
+                </el-select>
+              </el-form-item>
+            </el-col>
+            <el-col :span="12">
+              <el-form-item label="检测人">
+                <el-input v-model="formData.inspector" placeholder="检测人姓名" />
+              </el-form-item>
+            </el-col>
+          </el-row>
+          <el-row :gutter="20">
+            <el-col :span="12">
+              <el-form-item label="pH值">
+                <el-input-number v-model="formData.ph" :min="0" :max="14" :step="0.1" :precision="1" style="width: 100%;" />
+              </el-form-item>
+            </el-col>
+            <el-col :span="12">
+              <el-form-item label="硬度(mg/L)">
+                <el-input-number v-model="formData.hardness" :min="0" :max="500" :step="5" style="width: 100%;" />
+              </el-form-item>
+            </el-col>
+          </el-row>
+          <el-row :gutter="20">
+            <el-col :span="12">
+              <el-form-item label="检测日期">
+                <el-date-picker v-model="formData.testDate" type="date" style="width: 100%;" />
+              </el-form-item>
+            </el-col>
+            <el-col :span="12">
+              <el-form-item label="换土日期">
+                <el-date-picker v-model="formData.soilChangeDate" type="date" style="width: 100%;" />
+              </el-form-item>
+            </el-col>
+          </el-row>
+          <el-form-item label="检测照片">
+            <el-upload
+              :auto-upload="false"
+              :show-file-list="false"
+              accept="image/*"
+              @change="handleFileChange"
+            >
+              <el-button type="primary" :icon="Upload">选择照片</el-button>
+            </el-upload>
+          </el-form-item>
+        </el-form>
+        <template #footer>
+          <el-button @click="dialogVisible = false">取消</el-button>
+          <el-button type="primary" @click="handleSubmit">保存</el-button>
+        </template>
+      </el-dialog>
+
+      <el-dialog v-model="adviceDialogVisible" title="💡 调水建议" width="600px">
+        <div v-if="currentAdvice">
+          <div v-if="currentAdvice.suitableRange" class="advice-range-info">
+            <h4 style="margin-bottom: 8px; color: #2e7d32;">{{ currentAdvice.plant?.name }} 适宜区间</h4>
+            <el-descriptions :column="2" border size="small">
+              <el-descriptions-item label="适宜pH">{{ currentAdvice.suitableRange.pH[0] }} - {{ currentAdvice.suitableRange.pH[1] }}</el-descriptions-item>
+              <el-descriptions-item label="适宜硬度">{{ currentAdvice.suitableRange.hardness[0] }} - {{ currentAdvice.suitableRange.hardness[1] }} mg/L</el-descriptions-item>
+              <el-descriptions-item label="当前pH">
+                <el-tag :type="(currentAdvice.record.ph < currentAdvice.suitableRange.pH[0] || currentAdvice.record.ph > currentAdvice.suitableRange.pH[1]) ? 'danger' : 'success'">
+                  {{ currentAdvice.record.ph }}
+                </el-tag>
+              </el-descriptions-item>
+              <el-descriptions-item label="当前硬度">
+                <el-tag :type="(currentAdvice.record.hardness < currentAdvice.suitableRange.hardness[0] || currentAdvice.record.hardness > currentAdvice.suitableRange.hardness[1]) ? 'warning' : 'success'">
+                  {{ currentAdvice.record.hardness }}
+                </el-tag>
+              </el-descriptions-item>
+            </el-descriptions>
+          </div>
+          <div v-if="currentAdvice.advice && currentAdvice.advice.length > 0" style="margin-top: 16px;">
+            <h4 style="margin-bottom: 12px; color: #e65100;">⚠️ 调整建议</h4>
+            <div v-for="a in currentAdvice.advice" :key="a.field" class="advice-item" :class="'advice-' + a.level" style="margin-bottom: 12px;">
+              <span class="advice-icon">{{ a.level === 'warning' ? '⚠️' : 'ℹ️' }}</span>
+              <span>{{ a.message }}</span>
+            </div>
+          </div>
+          <div v-else style="margin-top: 16px; text-align: center; padding: 20px; color: #4caf50;">
+            <div style="font-size: 48px; margin-bottom: 8px;">✅</div>
+            <div>当前土壤水质参数在适宜区间内，无需调整</div>
+          </div>
+        </div>
+        <template #footer>
+          <el-button @click="adviceDialogVisible = false">关闭</el-button>
+        </template>
+      </el-dialog>
+    </div>
+  `
+};
+
 const YearlyReport = {
   setup() {
     const selectedYear = ref(new Date().getFullYear());
@@ -1721,6 +2306,7 @@ app.component('plant-management', PlantManagement);
 app.component('notification-page', NotificationPage);
 app.component('photo-timeline', PhotoTimeline);
 app.component('pest-detection', PestDetection);
+app.component('soil-archive', SoilArchive);
 app.component('yearly-report', YearlyReport);
 
 app.mount('#app');

@@ -22,23 +22,27 @@ logs/
 # Caches
 .cache/
 .parcel-cache/
-.npm/
-.pnpm-store/
-.yarn/
-.turbo/
-.next/
-.nuxt/
 .eslintcache
 .stylelintcache
-.tsbuildinfo
 .vite/
+.next/
+.nuxt/
+.svelte-kit/
+.turbo/
 coverage/
+*.cache
+*.tsbuildinfo
+.npm/
+.pnpm-store/
+.yarn/cache/
+.yarn/unplugged/
 
 # Temporary files
 tmp/
 temp/
 *.tmp
 *.temp
+*.pid
 
 # Local uploads and generated media
 uploads/
@@ -53,12 +57,13 @@ public/uploads/
 *.7z
 *.bak
 *.backup
-*.db
+*.iso
+*.dmg
+*.exe
+*.msi
 *.sqlite
 *.sqlite3
-*.mp4
-*.mov
-*.psd
+*.db
 
 # OS and editor files
 .DS_Store

@@ -728,18 +728,132 @@ body {
   .sidebar {
     width: 60px;
   }
-  
+
   .logo-text,
   .nav-menu span {
     display: none;
   }
-  
+
   .main-content {
     margin-left: 60px;
     padding: 20px;
   }
-  
+
   .page-title {
     font-size: 22px;
   }
+}
+
+.soil-record-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.soil-record-card {
+  background: white;
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  transition: transform 0.3s, box-shadow 0.3s;
+}
+
+.soil-record-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
+}
+
+.soil-record-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #eee;
+}
+
+.soil-record-plant {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.soil-record-plant-name {
+  font-size: 18px;
+  font-weight: bold;
+  color: #2e7d32;
+}
+
+.soil-record-date {
+  font-size: 13px;
+  color: #999;
+}
+
+.soil-record-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.soil-record-body {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 12px;
+}
+
+.soil-record-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.soil-field-label {
+  font-size: 13px;
+  color: #666;
+  white-space: nowrap;
+}
+
+.soil-field-value {
+  font-size: 14px;
+  color: #333;
+  font-weight: 500;
+}
+
+.soil-record-advice {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #eee;
+}
+
+.advice-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  margin-bottom: 8px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.advice-item.advice-warning {
+  background: #fff3e0;
+  border-left: 3px solid #ff9800;
+  color: #e65100;
+}
+
+.advice-item.advice-info {
+  background: #e3f2fd;
+  border-left: 3px solid #2196f3;
+  color: #1565c0;
+}
+
+.advice-icon {
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+.advice-range-info {
+  padding: 16px;
+  background: #f1f8e9;
+  border-radius: 8px;
 }

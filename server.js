@@ -57,6 +57,38 @@ const calculateNextCare = (plant) => {
   };
 };
 
+const plantSuitableRanges = {
+  'Epipremnum aureum': { pH: [5.5, 7.0], hardness: [60, 120], name: '绿萝' },
+  'Succulent': { pH: [6.0, 7.5], hardness: [40, 100], name: '多肉' },
+  'Chlorophytum comosum': { pH: [5.5, 7.0], hardness: [60, 120], name: '吊兰' },
+  'Pachira aquatica': { pH: [6.0, 7.5], hardness: [50, 120], name: '发财树' },
+  'Monstera deliciosa': { pH: [5.0, 6.5], hardness: [60, 120], name: '龟背竹' },
+  'Ficus lyrata': { pH: [5.5, 7.0], hardness: [50, 100], name: '琴叶榕' },
+  'Phalaenopsis': { pH: [5.5, 6.5], hardness: [30, 80], name: '蝴蝶兰' },
+  'Clivia miniata': { pH: [6.0, 7.0], hardness: [50, 120], name: '君子兰' },
+  'Cactaceae': { pH: [6.0, 7.5], hardness: [40, 80], name: '仙人掌' },
+  'Hedera nepalensis': { pH: [5.5, 7.0], hardness: [60, 120], name: '常春藤' },
+  'Aloe vera': { pH: [6.0, 7.5], hardness: [40, 100], name: '芦荟' },
+  'Asparagus setaceus': { pH: [5.5, 7.0], hardness: [50, 100], name: '文竹' }
+};
+
+const getWaterAdvice = (record, plant) => {
+  const advice = [];
+  const range = plantSuitableRanges[plant.species];
+  if (!range) return advice;
+  if (record.ph < range.pH[0]) {
+    advice.push({ field: 'pH', level: 'warning', message: `pH值${record.ph}偏低，${range.name}适宜pH ${range.pH[0]}-${range.pH[1]}。建议：可添加少量石灰水或草木灰提高pH，或使用偏碱性自来水浇灌。` });
+  } else if (record.ph > range.pH[1]) {
+    advice.push({ field: 'pH', level: 'warning', message: `pH值${record.ph}偏高，${range.name}适宜pH ${range.pH[0]}-${range.pH[1]}。建议：可使用硫酸亚铁溶液或食醋稀释液浇灌降低pH，或使用雨水/纯净水浇灌。` });
+  }
+  if (record.hardness < range.hardness[0]) {
+    advice.push({ field: 'hardness', level: 'info', message: `水质硬度${record.hardness}偏低，${range.name}适宜硬度 ${range.hardness[0]}-${range.hardness[1]}。建议：可适当添加含钙镁的肥料补充矿物质。` });
+  } else if (record.hardness > range.hardness[1]) {
+    advice.push({ field: 'hardness', level: 'warning', message: `水质硬度${record.hardness}偏高，${range.name}适宜硬度 ${range.hardness[0]}-${range.hardness[1]}。建议：使用纯净水或晾晒后的自来水，避免矿物质沉积影响根系吸收。` });
+  }
+  return advice;
+};
+
 const pestsKnowledge = [
   {
     id: 1,
@@ -559,6 +591,168 @@ app.get('/api/notifications', (req, res) => {
   
   notifications.sort((a, b) => new Date(a.date) - new Date(b.date));
   res.json(notifications);
+});
+
+app.get('/api/soil-records', (req, res) => {
+  const { plantId } = req.query;
+  let records = readJSON('soil-records.json');
+  if (plantId) {
+    records = records.filter(r => r.plantId === plantId);
+  }
+  records.sort((a, b) => new Date(b.testDate) - new Date(a.testDate));
+  res.json(records);
+});
+
+app.post('/api/soil-records', upload.single('photo'), (req, res) => {
+  const records = readJSON('soil-records.json');
+  const plants = readJSON('plants.json');
+  const newRecord = {
+    id: generateId(),
+    plantId: req.body.plantId,
+    medium: req.body.medium || '',
+    ph: parseFloat(req.body.ph) || 0,
+    hardness: parseFloat(req.body.hardness) || 0,
+    soilChangeDate: req.body.soilChangeDate || '',
+    inspector: req.body.inspector || '',
+    photo: req.file ? `/uploads/${req.file.filename}` : (req.body.photo || ''),
+    testDate: req.body.testDate || new Date().toISOString(),
+    createdAt: new Date().toISOString()
+  };
+  const plant = plants.find(p => p.id === newRecord.plantId);
+  const advice = plant ? getWaterAdvice(newRecord, plant) : [];
+  newRecord.advice = advice;
+  records.push(newRecord);
+  writeJSON('soil-records.json', records);
+  res.json({ ...newRecord, advice });
+});
+
+app.put('/api/soil-records/:id', upload.single('photo'), (req, res) => {
+  const records = readJSON('soil-records.json');
+  const plants = readJSON('plants.json');
+  const index = records.findIndex(r => r.id === req.params.id);
+  if (index === -1) {
+    return res.status(404).json({ error: '档案记录不存在' });
+  }
+  const updated = {
+    ...records[index],
+    medium: req.body.medium !== undefined ? req.body.medium : records[index].medium,
+    ph: req.body.ph !== undefined ? parseFloat(req.body.ph) : records[index].ph,
+    hardness: req.body.hardness !== undefined ? parseFloat(req.body.hardness) : records[index].hardness,
+    soilChangeDate: req.body.soilChangeDate !== undefined ? req.body.soilChangeDate : records[index].soilChangeDate,
+    inspector: req.body.inspector !== undefined ? req.body.inspector : records[index].inspector,
+    testDate: req.body.testDate !== undefined ? req.body.testDate : records[index].testDate,
+    updatedAt: new Date().toISOString()
+  };
+  if (req.file) {
+    updated.photo = `/uploads/${req.file.filename}`;
+  }
+  const plant = plants.find(p => p.id === updated.plantId);
+  updated.advice = plant ? getWaterAdvice(updated, plant) : [];
+  records[index] = updated;
+  writeJSON('soil-records.json', records);
+  res.json(updated);
+});
+
+app.delete('/api/soil-records/:id', (req, res) => {
+  let records = readJSON('soil-records.json');
+  const record = records.find(r => r.id === req.params.id);
+  if (!record) {
+    return res.status(404).json({ error: '档案记录不存在' });
+  }
+  if (record.photo) {
+    const filePath = path.join(__dirname, 'public', record.photo);
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
+  }
+  records = records.filter(r => r.id !== req.params.id);
+  writeJSON('soil-records.json', records);
+  res.json({ message: '删除成功' });
+});
+
+app.get('/api/soil-records/:id/advice', (req, res) => {
+  const records = readJSON('soil-records.json');
+  const plants = readJSON('plants.json');
+  const record = records.find(r => r.id === req.params.id);
+  if (!record) {
+    return res.status(404).json({ error: '档案记录不存在' });
+  }
+  const plant = plants.find(p => p.id === record.plantId);
+  const advice = plant ? getWaterAdvice(record, plant) : [];
+  res.json({ record, plant, advice, suitableRange: plant ? (plantSuitableRanges[plant.species] || null) : null });
+});
+
+app.get('/api/soil-reminders', (req, res) => {
+  const plants = readJSON('plants.json');
+  const records = readJSON('soil-records.json');
+  const now = new Date();
+  const reminders = [];
+
+  plants.forEach(plant => {
+    const plantRecords = records.filter(r => r.plantId === plant.id);
+    if (plantRecords.length < 2) return;
+
+    const sorted = plantRecords.sort((a, b) => new Date(b.testDate) - new Date(a.testDate));
+    const latest = sorted[0];
+    const previous = sorted[1];
+
+    const phDelta = Math.abs(latest.ph - previous.ph);
+    const hardnessDelta = Math.abs(latest.hardness - previous.hardness);
+
+    if (phDelta > 0.5 || hardnessDelta > 30) {
+      const changes = [];
+      if (phDelta > 0.5) changes.push(`pH变化${phDelta.toFixed(1)}`);
+      if (hardnessDelta > 30) changes.push(`硬度变化${hardnessDelta.toFixed(0)}`);
+
+      reminders.push({
+        id: `soil-change-${plant.id}`,
+        plantId: plant.id,
+        plantName: plant.name,
+        type: 'soil-change',
+        level: 'warning',
+        changes: changes,
+        latestRecord: latest,
+        previousRecord: previous,
+        message: `${plant.name} 土壤水质${changes.join('、')}，请及时验收确认`
+      });
+    }
+
+    if (latest.soilChangeDate) {
+      const changeDate = new Date(latest.soilChangeDate);
+      const daysSinceChange = Math.floor((now - changeDate) / (1000 * 60 * 60 * 24));
+      if (daysSinceChange >= 90 && daysSinceChange <= 100) {
+        reminders.push({
+          id: `soil-refresh-${plant.id}`,
+          plantId: plant.id,
+          plantName: plant.name,
+          type: 'soil-refresh',
+          level: 'info',
+          daysSinceChange,
+          message: `${plant.name} 已换土${daysSinceChange}天，建议检测土壤水质状况`
+        });
+      }
+    }
+
+    const advice = getWaterAdvice(latest, plant);
+    if (advice.length > 0) {
+      reminders.push({
+        id: `soil-advice-${plant.id}`,
+        plantId: plant.id,
+        plantName: plant.name,
+        type: 'soil-advice',
+        level: 'warning',
+        advice,
+        message: `${plant.name} 土壤水质参数不在适宜区间，请查看调水建议`
+      });
+    }
+  });
+
+  reminders.sort((a, b) => (a.level === 'warning' ? -1 : 1));
+  res.json(reminders);
+});
+
+app.get('/api/plant-suitable-ranges', (req, res) => {
+  res.json(plantSuitableRanges);
 });
 
 app.get('*', (req, res) => {
